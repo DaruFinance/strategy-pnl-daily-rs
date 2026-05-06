@@ -3,7 +3,7 @@
 **Fast Rust ETL: `trades.bin` + OHLCV → per-strategy daily PnL Parquet.**
 
 Companion ETL crate to the M-series of reference implementations on
-[daniel-v-gatto.com](https://daniel-v-gatto.com). Reads the binary trade
+[daru.finance](https://daru.finance). Reads the binary trade
 exports produced by
 [`quant-research-framework-rs`](https://github.com/DaruFinance/quant-research-framework-rs)
 / `quant-backtester-rs`, joins per-trade candle indices to the asset's
