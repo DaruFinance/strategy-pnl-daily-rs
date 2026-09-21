@@ -1,8 +1,8 @@
 //! pnl_daily ETL — fast Rust port.
 //!
 //! For each (asset, strategy) folder:
-//!   1. Read trades.bin (binary, see format in
-//!      quant-backtester-rs/src/main.rs:1922 export_trades_bin).
+//!   1. Read trades.bin (binary trade export of the walk-forward
+//!      backtester; format documented in the README).
 //!   2. For every section whose tag matches `^W\d+-OOS$`, add the per-window
 //!      bar offset (n_total - oos_total + (window-1)*per_window) so that
 //!      entry/exit indices become global bar indices.
@@ -10,8 +10,7 @@
 //!   4. Aggregate per (strategy, date) -> (sum_pnl, n_trades, n_long, n_short).
 //!
 //! Writes one Parquet file per asset to
-//! /mnt/d/strategies_parquet/pnl_daily/asset=<asset>/part-00000.parquet
-//! with a _DONE sentinel.
+//! <out-root>/asset=<asset>/part-00000.parquet with a _DONE sentinel.
 
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -44,8 +43,26 @@ struct AssetConfig {
 #[command(about = "Fast ETL: trades.bin -> per-strategy daily PnL Parquet")]
 struct Cli {
     /// Output root (one subdir per asset).
-    #[arg(long, default_value = "/mnt/d/strategies_parquet/pnl_daily")]
+    #[arg(long)]
     out_root: PathBuf,
+
+    /// Root holding one strategy folder per asset.
+    #[arg(long)]
+    strategies_root: PathBuf,
+
+    /// Root holding the forex (and BCH) strategy folders
+    /// (default: --strategies-root).
+    #[arg(long)]
+    fx_strategies_root: Option<PathBuf>,
+
+    /// Directory with the 30m crypto and 1h forex OHLCV CSVs.
+    #[arg(long)]
+    ohlcv_dir: PathBuf,
+
+    /// Directory with the BNB 15m and SOL 1h OHLCV CSVs
+    /// (default: --ohlcv-dir).
+    #[arg(long)]
+    ohlcv_extra_dir: Option<PathBuf>,
 
     /// Number of rayon threads (0 = auto).
     #[arg(short = 'j', long, default_value_t = 0)]
@@ -60,13 +77,13 @@ struct Cli {
     assets: Vec<String>,
 }
 
-/// Hard-coded asset config (mirror of the Python version).
-fn build_asset_configs() -> Vec<AssetConfig> {
-    let crypto_root = Path::new("/mnt/d/Strategies");
-    let fx_root = Path::new("/mnt/c/strategies");
-    let ohlc_30m = Path::new("/home/daru/golive_pipeline/data/ohlc");
-    let other = Path::new("/home/daru/data");
-    let fx = Path::new("/home/daru/golive_pipeline/data/ohlc");
+/// Asset list (mirror of the Python version); roots come from the CLI.
+fn build_asset_configs(cli: &Cli) -> Vec<AssetConfig> {
+    let crypto_root = cli.strategies_root.as_path();
+    let fx_root = cli.fx_strategies_root.as_deref().unwrap_or(crypto_root);
+    let ohlc_30m = cli.ohlcv_dir.as_path();
+    let other = cli.ohlcv_extra_dir.as_deref().unwrap_or(ohlc_30m);
+    let fx = ohlc_30m;
 
     let mut out = Vec::new();
     let mut add = |asset: &str, root: &Path, ohlc: PathBuf| {
@@ -77,7 +94,7 @@ fn build_asset_configs() -> Vec<AssetConfig> {
         });
     };
 
-    // Crypto 30m (24 assets, all from golive_pipeline/data/ohlc/)
+    // Crypto 30m (24 assets, OHLCV in --ohlcv-dir)
     let crypto_30m = [
         ("AAVE_30m_17W", "AAVEUSDT_30m_3_9.csv"),
         ("ALGO_30m_6W_1MetaW", "ALGOUSDT_30m_3_9.csv"),
@@ -86,8 +103,8 @@ fn build_asset_configs() -> Vec<AssetConfig> {
         ("ARB_30m_6W_1MetaW", "ARBUSDT_30m_3_9.csv"),
         ("ATOM_30m_6W_1MetaW", "ATOMUSDT_30m_3_9.csv"),
         ("AVAX_30m_17W", "AVAXUSDT_30m_3_9.csv"),
-        // BCH is intentionally NOT here — its strategy folder lives on the
-        // forex root (/mnt/c/strategies/), so it's added separately below.
+        // BCH is intentionally NOT here: its strategy folder lives on the
+        // forex root (--fx-strategies-root), so it's added separately below.
         ("BTC_30m_27W", "BTCUSDT_30m_3_9.csv"),
         ("DOGE_30m_21W", "DOGEUSDT_30m_3_9.csv"),
         ("DOT_30m_6W_1MetaW", "DOTUSDT_30m_3_9.csv"),
@@ -110,11 +127,11 @@ fn build_asset_configs() -> Vec<AssetConfig> {
         add(asset, crypto_root, ohlc_30m.join(csv));
     }
 
-    // BNB 15m and SOL 1h have non-30m timeframes -> /home/daru/data/
+    // BNB 15m and SOL 1h have non-30m timeframes -> --ohlcv-extra-dir
     add("BNB_15m_30W", crypto_root, other.join("BNBUSDT_15m_3_9.csv"));
     add("SOL_1h_7W", crypto_root, other.join("SOLUSDT_1h_3_9.csv"));
 
-    // BCH lives on /mnt/c/strategies/ even though it's spot-crypto data.
+    // BCH lives on the forex root even though it's spot-crypto data.
     add("BCH_30m_20W", fx_root, ohlc_30m.join("BCHUSDT_30m_3_9.csv"));
 
     // Forex 1h
@@ -487,7 +504,7 @@ fn main() {
             .expect("rayon threadpool");
     }
     fs::create_dir_all(&cli.out_root).expect("mkdir out_root");
-    let cfgs = build_asset_configs();
+    let cfgs = build_asset_configs(&cli);
     let cfgs: Vec<_> = if cli.assets.is_empty() {
         cfgs
     } else {

@@ -4,9 +4,9 @@
 
 Companion ETL crate to the M-series of reference implementations on
 [daru.finance](https://daru.finance). Reads the binary trade
-exports produced by
-[`quant-research-framework-rs`](https://github.com/DaruFinance/quant-research-framework-rs)
-/ `quant-backtester-rs`, joins per-trade candle indices to the asset's
+exports of the walk-forward backtester that became
+[`quant-research-framework-rs`](https://github.com/DaruFinance/quant-research-framework-rs),
+joins per-trade candle indices to the asset's
 OHLCV timestamp axis, and writes a long-format Parquet at one row per
 `(asset, strategy_name, date)`.
 
@@ -17,9 +17,7 @@ Arrow record-batch construction.
 
 ## What it solves
 
-`trades.bin` (see
-[`quant-backtester-rs/src/main.rs`](https://github.com/DaruFinance/quant-backtester-rs)
-`export_trades_bin`) is a stream of sections. Each section header is
+`trades.bin` is a stream of sections. Each section header is
 `u16 strat_len, strat, u16 lb_len, lb_label, u16 sec_len, segment,
 u32 trade_count`, followed by `trade_count` records of
 `u32 entry_idx, u32 exit_idx, i8 side, f64 pnl` (17 bytes per record,
@@ -48,27 +46,25 @@ cd strategy-pnl-daily-rs
 cargo build --release
 
 ./target/release/pnl_daily \
+    --strategies-root /path/to/strategies \
+    --ohlcv-dir /path/to/ohlcv \
+    --out-root /path/to/pnl_daily \
     --assets BTC_30m_27W \
-    --assets ETH_30m_28W \
-    --out-root /mnt/d/strategies_parquet/pnl_daily
+    --assets ETH_30m_28W
 ```
 
-Per-asset config is hard-coded in `src/main.rs` (`build_asset_configs`)
-to mirror the layout the user has on disk:
-- 24 crypto USDT 30m pairs at `/mnt/d/Strategies/<asset>` with OHLCV at
-  `/home/daru/golive_pipeline/data/ohlc/`
-- BNB 15m + SOL 1h with OHLCV at `/home/daru/data/`
-- BCH 30m on the FX root (`/mnt/c/strategies/`)
-- 3 forex pairs (AUDUSD, USDCAD, USDCHF) on the FX root with dukascopy
-  OHLCV
-
-Adjust the function for your layout.
+The asset list lives in `build_asset_configs` in `src/main.rs`, which is the
+function to edit for a different set of assets:
+- 24 crypto USDT 30m pairs under `--strategies-root`, OHLCV in `--ohlcv-dir`
+- BNB 15m and SOL 1h, OHLCV in `--ohlcv-extra-dir` (defaults to `--ohlcv-dir`)
+- BCH 30m and 3 forex pairs (AUDUSD, USDCAD, USDCHF, dukascopy OHLCV) under
+  `--fx-strategies-root` (defaults to `--strategies-root`)
 
 ## Output
 
 ```
-/mnt/d/strategies_parquet/pnl_daily/asset=<ASSET>/part-00000.parquet
-/mnt/d/strategies_parquet/pnl_daily/asset=<ASSET>/_DONE
+<out-root>/asset=<ASSET>/part-00000.parquet
+<out-root>/asset=<ASSET>/_DONE
 ```
 
 Schema:
